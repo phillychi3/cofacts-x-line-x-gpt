@@ -29,7 +29,6 @@ func main() {
 	}
 	client := graphql.NewClient("https://api.cofacts.tw/graphql")
 
-	// Setup HTTP Server for receiving requests from LINE platform
 	http.HandleFunc("/callback", func(w http.ResponseWriter, req *http.Request) {
 		events, err := bot.ParseRequest(req)
 		if err != nil {
@@ -107,7 +106,6 @@ func main() {
 					}
 					log.Println(respData)
 					if respData.ListArticles.TotalCount != 0 && respData.ListArticles.Edges[0].Node.ArticleReplies[0].Reply.Type == "RUMOR" {
-						// creage a response to https://api.pawan.krd/v1/chat/completions
 						log.Print("檢測可能為不實資訊，系統產生報告中...")
 						data := (`
 						{
@@ -182,8 +180,6 @@ func main() {
 			}
 		}
 	})
-	// This is just sample code.
-	// For actual use, you must support HTTPS by using `ListenAndServeTLS`, a reverse proxy or something else.
 	if err := http.ListenAndServe(":"+os.Getenv("PORT"), nil); err != nil {
 		log.Fatal(err)
 	}
