@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/line/line-bot-sdk-go/v7/linebot"
 	"github.com/machinebox/graphql"
+	"github.com/texttheater/golang-levenshtein/levenshtein"
 )
 
 func main() {
@@ -27,6 +29,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println("Bot is running...")
 	client := graphql.NewClient("https://api.cofacts.tw/graphql")
 
 	http.HandleFunc("/callback", func(w http.ResponseWriter, req *http.Request) {
@@ -104,17 +107,37 @@ func main() {
 					if err := client.Run(ctx, req, &respData); err != nil {
 						log.Fatal(err)
 					}
-					log.Println(respData)
+					if respData.ListArticles.TotalCount != 1 {
+						// find out the most similar article
+						var mostSimilarText string
+						var minDistance int
+						var target int
+
+						for i := 0; i < respData.ListArticles.TotalCount; i++ {
+							distance := levenshtein.DistanceForStrings([]rune(msgtext), []rune(respData.ListArticles.Edges[i].Node.Text), levenshtein.DefaultOptions)
+							if minDistance == 0 || distance < minDistance {
+								minDistance = distance
+								mostSimilarText = respData.ListArticles.Edges[i].Node.Text
+								target = i
+							}
+						}
+
+						// do something with the most similar article
+						fmt.Printf("The most similar article to '%s' is '%s'\n", msgtext, mostSimilarText)
+						respData.ListArticles.Edges[0] = respData.ListArticles.Edges[target]
+
+					}
+
 					if respData.ListArticles.TotalCount != 0 && respData.ListArticles.Edges[0].Node.ArticleReplies[0].Reply.Type == "RUMOR" {
 						log.Print("檢測可能為不實資訊，系統產生報告中...")
 						data := (`
 						{
 							"model": "gpt-3.5-turbo",
-							"max_tokens": 600,
+							"max_tokens": 2000,
 							"messages": [
 								{
 									"role": "system",
-									"content": "請幫我以第三者的角度去客觀的解釋這個問題，使用100字，並在最後給出結論"
+									"content": "請幫我使用繁體中文，以第三者的角度去客觀的解釋這個問題，請避開政治議題，並在最後給出結論"
 								},
 								{
 									"role": "user",
@@ -127,6 +150,7 @@ func main() {
 						artext = strings.Replace(artext, "\n", "", -1)
 						artext = strings.Replace(artext, "\"", "", -1)
 						message := "謠言:" + msgtext + "。" + "解釋:" + artext
+						log.Print(message)
 						data = strings.Replace(data, "<replace>", message, 1)
 						req, err := http.NewRequest("POST", "https://api.pawan.krd/v1/chat/completions", bytes.NewBuffer([]byte(data)))
 						if err != nil {
@@ -167,9 +191,15 @@ func main() {
 							log.Fatal(err)
 						}
 						log.Println(body)
-
-						if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewTextMessage(body.Choices[0].Message.Content)).Do(); err != nil {
-							log.Print(err)
+						if len(body.Choices) == 0 {
+							log.Print("API error")
+							if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewTextMessage("此訊息為謠言，但系統無法生成回復")).Do(); err != nil {
+								log.Print(err)
+							}
+						} else {
+							if _, err = bot.ReplyMessage(event.ReplyToken, linebot.NewTextMessage("偵測到謠言，AI回復僅供參考:"+body.Choices[0].Message.Content)).Do(); err != nil {
+								log.Print(err)
+							}
 						}
 
 					}
